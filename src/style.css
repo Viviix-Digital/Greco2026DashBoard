@@ -1,0 +1,174 @@
+:root {
+  --ink: #6d7690;
+  --ink-strong: #4d5874;
+  --pill: #f7faf8;
+  --line: rgba(120, 140, 160, 0.18);
+  --shadow: 0 8px 18px rgba(40, 84, 70, 0.12), 0 1px 0 rgba(255, 255, 255, 0.85) inset;
+  color: var(--ink);
+  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body { overflow: hidden; background: #6eab93; }
+button, input { font: inherit; color: inherit; }
+
+#app { position: relative; }
+.backdrop, canvas, #hud { position: absolute; inset: 0; }
+.backdrop { width: 100%; height: 100%; display: block; }
+canvas { width: 100%; height: 100%; display: block; }
+#hud { pointer-events: none; z-index: 2; }
+#hud button, #hud input, #hud .panel { pointer-events: auto; }
+
+.cluster {
+  position: absolute;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.top-left { top: 16px; left: 16px; }
+.top-right { top: 16px; right: 16px; }
+.bottom-center {
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--pill);
+  padding: 6px;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  gap: 4px;
+}
+
+.btn {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--pill);
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+  position: relative;
+  cursor: pointer;
+  color: var(--ink);
+}
+.btn.active { background: #e7edf8; color: var(--ink-strong); }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn .dot {
+  display: none;
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e15d5d;
+}
+.btn.armed .dot { display: block; }
+
+.zoom {
+  display: flex;
+  align-items: center;
+  background: var(--pill);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+  gap: 2px;
+}
+.zoom .btn { box-shadow: none; background: transparent; width: 34px; height: 34px; }
+.zoom .label {
+  min-width: 74px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: #8b93a6;
+}
+
+.rail {
+  position: absolute;
+  top: 72px;
+  left: 16px;
+  width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tool-row, .catalog {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.cell {
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 8px 16px rgba(48, 90, 74, 0.1);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--ink);
+}
+.cell.selected { outline: 2px solid #8ea0e0; background: #f4f7ff; }
+.cell.gone { display: none; }
+
+.search {
+  display: none;
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: white;
+  box-shadow: var(--shadow);
+  padding: 8px 12px;
+  outline: none;
+}
+.search.show { display: block; }
+
+.empty {
+  display: none;
+  grid-column: 1 / -1;
+  background: rgba(255, 255, 255, 0.72);
+  border-radius: 16px;
+  min-height: 92px;
+  padding: 16px 12px;
+  text-align: center;
+  color: #6d8f80;
+  box-shadow: var(--shadow);
+}
+.empty.show { display: grid; place-items: center; gap: 4px; }
+.empty strong { font-weight: 650; color: #4f7464; }
+.empty span { font-size: 12px; }
+
+.panel {
+  position: absolute;
+  top: 64px;
+  width: 230px;
+  background: rgba(247, 250, 248, 0.96);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+  color: var(--ink-strong);
+}
+.panel h3 { margin: 0 0 6px; font-size: 14px; }
+.panel p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.45; color: #667086; }
+.panel .row { display: flex; gap: 6px; }
+.panel button.wide {
+  border: 0;
+  background: white;
+  border-radius: 10px;
+  padding: 8px 10px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.top-left .panel { left: 0; }
+.top-right .panel { right: 0; }
+
+.enter { animation: rise 0.48s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+.bottom-center .btn { box-shadow: none; background: transparent; }
+.bottom-center .btn.active { background: #e7edf8; border-radius: 12px; }
