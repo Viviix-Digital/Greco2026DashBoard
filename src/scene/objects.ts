@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { buildCat, buildDrawing, buildGirl, buildPainter, buildReader } from "./characters/index";
 import { buildProp } from "./props";
 
 export type Kind =
@@ -32,14 +31,7 @@ export type Kind =
   | "acorn"
   | "carrot"
   | "cylinder"
-  | "ring"
-  | "reader"
-  | "painter"
-  | "girl"
-  | "drawing"
-  | "cat";
-
-export type Mount = "floor" | "right-wall";
+  | "ring";
 
 export interface SceneItem {
   id: string;
@@ -49,25 +41,8 @@ export interface SceneItem {
   rot: number;
 }
 
-export function mountOf(kind: Kind): Mount {
-  return kind === "frame" ? "right-wall" : "floor";
-}
-
 export function createObject(kind: Kind) {
-  switch (kind) {
-    case "reader":
-      return buildReader();
-    case "painter":
-      return buildPainter();
-    case "girl":
-      return buildGirl();
-    case "drawing":
-      return buildDrawing();
-    case "cat":
-      return buildCat();
-    default:
-      return buildProp(kind);
-  }
+  return buildProp(kind);
 }
 
 export function footprintOf(group: THREE.Group): [number, number] {

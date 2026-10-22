@@ -1,8 +1,13 @@
 import "./style.css";
 import { installClay } from "./clay";
 import { tickSprings, tickTweens } from "./anim";
-import { Editor } from "./editor/editor";
+import { loadConfig, type LiveConfig } from "./live/config";
+import { MockFeed } from "./live/mock";
+import { VisionSocket, type Feed } from "./live/socket";
+import { LiveStore } from "./live/store";
 import { createWorld } from "./scene/createScene";
+import { PeopleStage } from "./scene/people/stage";
+import { RoomView } from "./scene/roomView";
 import { mount } from "./ui/chrome";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -14,8 +19,52 @@ const canvas = document.createElement("canvas");
 app.append(canvas);
 
 const world = createWorld(canvas);
-const editor = new Editor(world);
-mount(app, editor);
+const room = new RoomView(world);
+const store = new LiveStore(loadConfig());
+const stage = new PeopleStage(world, store, room);
+
+let testing = new URLSearchParams(location.search).get("mock") === "1";
+let live: Feed | null = null;
+let mock: Feed | null = null;
+
+/** Swap between the Vision Expo socket and the offline fake-people feed. */
+const setTest = (on: boolean) => {
+  testing = on;
+  live?.stop();
+  mock?.stop();
+  store.mock = on;
+  store.clear();
+  if (on) {
+    mock ??= new MockFeed(store);
+    mock.start();
+  } else {
+    live ??= new VisionSocket(store);
+    live.start();
+  }
+};
+
+const applyConfig = (config: LiveConfig) => {
+  store.setConfig(config);
+  setTest(testing);
+};
+
+mount(app, { room, store, onConfig: applyConfig, onTest: setTest });
+
+canvas.addEventListener("pointerdown", (e) => {
+  const key = stage.pick(e);
+  if (key) store.select(key);
+  else if (store.selected) store.select(null);
+});
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    room.stepZoom(e.deltaY > 0 ? -1 : 1);
+  },
+  { passive: false },
+);
+
+setTest(testing);
 
 let last = performance.now();
 const frame = (now: number) => {
@@ -23,13 +72,14 @@ const frame = (now: number) => {
   last = now;
   tickTweens(dt);
   tickSprings(dt);
-  editor.update(dt);
+  room.update(dt);
+  stage.update(dt);
   world.renderer.render(world.scene, world.camera);
-  if (editor.ready) document.body.dataset.ready = "1";
+  if (room.ready) document.body.dataset.ready = "1";
   requestAnimationFrame(frame);
 };
 requestAnimationFrame(frame);
 
 if (import.meta.env.DEV) {
-  Object.assign(window, { __room: { world, editor } });
+  Object.assign(window, { __room: { world, room, store, stage } });
 }
