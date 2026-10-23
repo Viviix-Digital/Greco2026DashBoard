@@ -17,6 +17,12 @@ export interface Recipe {
   hair: string;
   hairStyle: HairStyle;
   beret?: string;
+  /** Construction hard hat colour (dome + brim worn over the hair shell). */
+  hardHat?: string;
+  /** Store staff cap colour. */
+  cap?: string;
+  /** Store staff apron colour, worn over the torso front. */
+  apron?: string;
   lower?: "pants" | "skirt";
   skirtColor?: string;
   /** Player extras: ribbed cuffs, collar roll, ahoge. */
@@ -124,6 +130,7 @@ export class Avatar {
     this.buildHands(skinM);
     this.buildFeet(r);
     if (r.lower === "skirt") this.buildSkirt(r);
+    if (r.apron) this.buildApron(r);
   }
 
   /** Torso, arms and legs as one continuous vertex-coloured skinned surface. */
@@ -446,6 +453,43 @@ export class Avatar {
       put(h, beret, 0.03, 0.305, 0.0);
       put(h, blob(0.014, 1, 1, 1, beretM, 8), 0.01, 0.345, 0.0);
     }
+
+    if (r.hardHat) {
+      const hatM = lambert(r.hardHat);
+      const dome = blob(0.175, 1.02, 0.72, 1.02, hatM, 22);
+      put(h, dome, 0, 0.235, -0.005);
+      const ridge = blob(0.05, 0.55, 0.5, 2.4, hatM, 10);
+      put(h, ridge, 0, 0.315, -0.005);
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.215, 0.225, 0.022, 22), hatM);
+      brim.castShadow = true;
+      put(h, brim, 0, 0.205, -0.005);
+    }
+
+    if (r.cap) {
+      const capM = lambert(r.cap);
+      const dome = blob(0.172, 1.0, 0.68, 1.0, capM, 22);
+      put(h, dome, 0, 0.225, -0.01);
+      const visor = blob(0.11, 1.25, 0.16, 1.1, capM, 14);
+      put(h, visor, 0, 0.185, 0.17);
+      const button = blob(0.022, 1, 1, 1, capM, 8);
+      put(h, button, 0, 0.295, -0.01);
+    }
+  }
+
+  /** Flat apron panel + waist strap in front of the torso (store staff). */
+  private buildApron(r: Recipe) {
+    const mat = lambert(r.apron as string);
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.3, 0.018), mat);
+    panel.castShadow = true;
+    panel.rotation.x = 0.06;
+    put(this.chest, panel, 0, -0.02, 0.125);
+    const bib = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.12, 0.016), mat);
+    bib.castShadow = true;
+    put(this.chest, bib, 0, 0.14, 0.118);
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.03, 0.02), mat);
+    put(this.pelvis, strap, 0, 0.06, 0.115);
+    const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.07, 0.008), lambert(r.topAlt ?? r.apron as string));
+    put(this.chest, pocket, 0, -0.08, 0.138);
   }
 
   /** One smooth hair shell: a sphere pulled in under the hairline so only the cap stays proud. */

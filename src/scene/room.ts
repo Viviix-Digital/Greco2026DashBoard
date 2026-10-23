@@ -7,7 +7,17 @@ import { PAL, ROOM, WINDOWS } from "../theme";
 const wood = () => woodMaterial(PAL.wood);
 const woodDeep = () => woodMaterial(PAL.woodDeep);
 
-export function buildRoom() {
+import { buildBoothShell, buildConstructionShell, buildStoreShell } from "./themedShells";
+import type { ThemeId } from "./themes/types";
+
+export function buildRoom(theme: ThemeId = "room") {
+  if (theme === "construction") return buildConstructionShell();
+  if (theme === "store") return buildStoreShell();
+  if (theme === "booth") return buildBoothShell();
+  return buildClassicRoom();
+}
+
+function buildClassicRoom() {
   const group = new THREE.Group();
   group.name = "room";
 

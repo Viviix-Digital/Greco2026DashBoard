@@ -2,9 +2,11 @@ import { bindSpring, enableSprings } from "../anim";
 import { saveConfig, splitList, type LiveConfig } from "../live/config";
 import { beepAlert } from "../live/sound";
 import type { LiveStore } from "../live/store";
-import type { FeedEvent, PersonView } from "../live/types";
+import { formatDuration } from "../live/time";
+import type { CompletedVisit, FeedEvent, PersonView } from "../live/types";
 import type { RoomView } from "../scene/roomView";
 import { ALERT_COLOR, SIDE_COLOR, SIDE_TEXT, itemNames, personTitle } from "../scene/people/label";
+import { THEME_LIST, type ThemeId } from "../scene/themes";
 import { backdropMarkup } from "./backdrop";
 import { ICONS } from "./icons";
 
@@ -39,6 +41,8 @@ export interface HudOptions {
   onConfig: (config: LiveConfig) => void;
   /** Turn the offline fake-people feed on or off. */
   onTest: (on: boolean) => void;
+  theme: ThemeId;
+  onTheme: (theme: ThemeId) => void;
 }
 
 function esc(text: unknown) {
@@ -49,14 +53,17 @@ function clock(ts: number) {
   return new Date(ts * 1000).toLocaleTimeString("vi-VN", { hour12: false });
 }
 
-export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOptions) {
-  app.insertAdjacentHTML("afterbegin", backdropMarkup());
+export function mount(app: HTMLElement, { room, store, onConfig, onTest, theme, onTheme }: HudOptions) {
+  app.insertAdjacentHTML("afterbegin", backdropMarkup(theme));
   const hud = document.createElement("div");
   hud.id = "hud";
   hud.innerHTML = `
     <div class="cluster top-left">
       <div class="conn card" data-conn><i class="led"></i><span data-conn-text>Chưa kết nối</span></div>
       <button class="btn test" data-act="test" title="Chế độ test: người và dữ liệu giả">Test</button>
+      <select class="cam-select card theme-select" data-theme title="Theme 3D">
+        ${THEME_LIST.map((t) => `<option value="${t.id}"${t.id === theme ? " selected" : ""}>${t.label}</option>`).join("")}
+      </select>
       <select class="cam-select card" data-camera title="Camera"></select>
     </div>
     <div class="cluster top-right">
@@ -91,6 +98,7 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
     <div class="rail right-rail">
       <div class="card stats" data-stats></div>
       <div class="card detail" data-detail hidden></div>
+      <div class="card visits" data-visits></div>
       <div class="card feed" data-feed></div>
     </div>
   `;
@@ -106,6 +114,7 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
   const statsEl = $("[data-stats]");
   const peopleEl = $("[data-people]");
   const detailEl = $("[data-detail]");
+  const visitsEl = $("[data-visits]");
   const feedEl = $("[data-feed]");
   const banner = $("[data-banner]");
   const fields = {
@@ -132,6 +141,12 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
 
   hud.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
+    const visit = target.closest<HTMLElement>("[data-visit-key]");
+    if (visit?.dataset.visitKey) {
+      const key = visit.dataset.visitKey;
+      if (store.people().some((p) => p.key === key)) store.select(key);
+      return;
+    }
     const person = target.closest<HTMLElement>("[data-key]");
     if (person?.dataset.key) {
       store.select(person.dataset.key);
@@ -181,6 +196,20 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
 
   camSelect.addEventListener("change", () => store.selectCamera(camSelect.value));
 
+  const themeSelect = $<HTMLSelectElement>("[data-theme]");
+  themeSelect.addEventListener("change", () => {
+    const next = themeSelect.value as ThemeId;
+    const old = app.querySelector("[data-backdrop]");
+    if (old) {
+      const tpl = document.createElement("template");
+      tpl.innerHTML = backdropMarkup(next).trim();
+      old.replaceWith(tpl.content.firstElementChild as Element);
+    }
+    document.body.dataset.theme = next;
+    onTheme(next);
+  });
+  document.body.dataset.theme = theme;
+
   // --- renderers: each rebuilds its DOM only when its signature changes -------------------------
 
   const sigs = new Map<string, string>();
@@ -229,7 +258,7 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
     const n = (v: number | null) => (v === null || v === undefined ? "–" : String(v));
     const status = CAMERA_STATUS[s.status] ?? s.status;
     const fps = s.fps !== null ? ` · ${s.fps.toFixed(0)} fps` : "";
-    const sig = [s.persons, s.inside, s.outside, s.objects, s.alerts, s.status, s.fps?.toFixed(0)].join("|");
+    const sig = [s.persons, s.inside, s.outside, s.objects, s.alerts, s.entries, s.exits, s.status, s.fps?.toFixed(0)].join("|");
     if (!changed("stats", sig)) return;
     statsEl.innerHTML = `
       <div class="stat-head"><strong>Tổng quan</strong><span class="chip ${s.status === "running" ? "ok" : "warn"}">${esc(status)}${esc(fps)}</span></div>
@@ -237,9 +266,19 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
         <div><b>${n(s.persons)}</b><span>Đang thấy</span></div>
         <div><b>${n(s.inside)}</b><span>Trong vùng</span></div>
         <div><b>${n(s.outside)}</b><span>Ngoài vùng</span></div>
+        <div><b>${n(s.entries)}</b><span>Lượt vào</span></div>
+        <div><b>${n(s.exits)}</b><span>Lượt ra</span></div>
         <div><b>${n(s.objects)}</b><span>Vật phẩm</span></div>
         <div class="${s.alerts > 0 ? "danger" : ""}"><b>${n(s.alerts)}</b><span>Cảnh báo</span></div>
       </div>`;
+  };
+
+  const personTimeChip = (p: PersonView) => {
+    if (p.track_id === null || p.track_id === undefined) return "";
+    const elapsed = store.primaryElapsed(p.key, p.side);
+    if (elapsed === null) return "";
+    const label = p.side === "in" ? "vùng" : "thấy";
+    return `<em class="time-chip" title="${label}">${esc(formatDuration(elapsed))}</em>`;
   };
 
   const personRow = (p: PersonView) => {
@@ -255,16 +294,24 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
     const color = p.alert ? ALERT_COLOR : SIDE_COLOR[p.side];
     return `
       <button class="person${p.alert ? " alert" : ""}${p.key === store.selected ? " selected" : ""}" data-key="${esc(p.key)}">
-        <span class="person-head"><i class="led" style="background:${color}"></i><strong>${esc(personTitle(p))}</strong><em>${esc(SIDE_TEXT[p.side])}</em></span>
+        <span class="person-head"><i class="led" style="background:${color}"></i><strong>${esc(personTitle(p))}</strong>${personTimeChip(p)}<em>${esc(SIDE_TEXT[p.side])}</em></span>
         <span class="chips">${chips}</span>
       </button>`;
+  };
+
+  const peopleTimeSig = () => {
+    const at = store.now();
+    return store
+      .people()
+      .map((p) => `${p.key}:${Math.round(store.primaryElapsed(p.key, p.side, at) ?? -1)}`)
+      .join(";");
   };
 
   const renderPeople = () => {
     const people = store.people();
     const sig = `${store.conn.state}|${store.selected}|${people
       .map((p) => `${p.key}:${p.side}:${p.alert}:${itemNames(p).join("+")}`)
-      .join(";")}`;
+      .join(";")}|${peopleTimeSig()}`;
     if (!changed("people", sig)) return;
     const body = people.length
       ? people.map(personRow).join("")
@@ -272,10 +319,53 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
     peopleEl.innerHTML = `<div class="stat-head"><strong>Người trong khung</strong><span class="chip">${people.length}</span></div><div class="list">${body}</div>`;
   };
 
+  const detailTimeBlock = (p: PersonView) => {
+    if (p.track_id === null || p.track_id === undefined) {
+      return `<div class="time-block"><div class="time-row"><span>Thời gian</span><b>—</b></div></div>`;
+    }
+    const sess = store.session(p.key);
+    const visible = store.visibleElapsed(p.key);
+    const zone = store.zoneElapsed(p.key);
+    const seenAt = sess ? clock(sess.firstSeenTs) : "—";
+    const zoneAt = sess?.zoneEnterTs != null ? clock(sess.zoneEnterTs) : null;
+    const zoneLabel =
+      zone !== null
+        ? formatDuration(zone)
+        : sess?.lastDwellS != null
+          ? formatDuration(sess.lastDwellS)
+          : "—";
+    const zoneHint =
+      zone !== null && sess?.zoneEstimated
+        ? `<span class="muted time-hint">ước lượng</span>`
+        : zone === null && sess?.lastDwellS != null
+          ? `<span class="muted time-hint">lần trước</span>`
+          : "";
+    const steps = [
+      `<span class="tl-step on">Vào khung · ${esc(seenAt)}</span>`,
+      zoneAt
+        ? `<span class="tl-step on">Vào vùng · ${esc(zoneAt)}${sess?.zoneEstimated ? " ~" : ""}</span>`
+        : `<span class="tl-step">Chưa vào vùng</span>`,
+      sess?.alertTs != null || p.alert
+        ? `<span class="tl-step alert">Cảnh báo</span>`
+        : `<span class="tl-step">Không cảnh báo</span>`,
+      `<span class="tl-step on">Đang theo dõi</span>`,
+    ];
+    return `
+      <div class="time-block">
+        <div class="time-row"><span>Đang thấy</span><b data-live-visible>${esc(visible !== null ? formatDuration(visible) : "—")}</b></div>
+        <div class="time-row"><span>Trong vùng</span><b data-live-zone>${esc(zoneLabel)}</b>${zoneHint}</div>
+        <div class="time-row muted"><span>Xuất hiện lúc</span><span>${esc(seenAt)}</span></div>
+        <div class="time-line">${steps.join("")}</div>
+      </div>`;
+  };
+
   const renderDetail = () => {
     const p = store.selectedPerson();
+    const at = store.now();
+    const vis = p ? Math.round(store.visibleElapsed(p.key, at) ?? -1) : -1;
+    const zon = p ? Math.round(store.zoneElapsed(p.key, at) ?? -1) : -1;
     const sig = p
-      ? `${p.key}|${p.side}|${p.alert}|${p.conf}|${p.objects.map((o) => `${o.label}:${o.conf.toFixed(2)}`).join(",")}`
+      ? `${p.key}|${p.side}|${p.alert}|${p.conf}|${p.objects.map((o) => `${o.label}:${o.conf.toFixed(2)}`).join(",")}|${vis}|${zon}|${store.session(p.key)?.zoneEstimated ? 1 : 0}|${store.session(p.key)?.lastDwellS ?? ""}`
       : "";
     if (!changed("detail", sig)) return;
     if (!p) {
@@ -304,7 +394,48 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
         ${p.alert ? `<span class="chip bad">Cảnh báo vũ khí</span>` : ""}
         <span class="muted">Độ tin cậy ${Math.round((p.conf ?? 0) * 100)}%</span>
       </div>
+      ${detailTimeBlock(p)}
       <div class="objs">${rows}</div>`;
+  };
+
+  const visitItems = (v: CompletedVisit) => {
+    const entries = Object.entries(v.items);
+    if (!entries.length) return "không có vật";
+    const frames = v.frames && v.frames > 0 ? v.frames : null;
+    return entries
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([label, n]) => {
+        const name = store.viOf(label);
+        if (frames) return `${name} ~${Math.round((n / frames) * 100)}%`;
+        return name;
+      })
+      .join(", ");
+  };
+
+  const visitLine = (v: CompletedVisit) => {
+    const id = v.trackId === null ? "#?" : `#${v.trackId}`;
+    const key = v.trackId !== null ? `${v.cameraId}:${v.trackId}` : "";
+    const live = key && store.people().some((p) => p.key === key);
+    const dwell = v.dwellS != null ? ` · ở trong ${esc(formatDuration(v.dwellS))}` : "";
+    const alert = v.alert ? ` <span class="chip bad tiny">alert</span>` : "";
+    return `
+      <button class="visit${live ? " live" : ""}" type="button" data-visit-key="${esc(key)}" ${key ? "" : "disabled"}>
+        <span class="visit-main"><strong>${esc(id)}</strong> · ${esc(formatDuration(v.duration))} thấy${dwell}${alert}</span>
+        <span class="visit-sub">${esc(visitItems(v))} · ${esc(clock(v.lastTs))}</span>
+      </button>`;
+  };
+
+  const renderVisits = () => {
+    const list = store.recentVisits(10);
+    const sig = `${store.activeCamera}|${list.map((v) => `${v.id}:${v.dwellS ?? ""}`).join(";")}|${store.people()
+      .map((p) => p.key)
+      .join(",")}`;
+    if (!changed("visits", sig)) return;
+    const body = list.length
+      ? list.map(visitLine).join("")
+      : `<div class="empty-note">Chưa có lượt hoàn tất</div>`;
+    visitsEl.innerHTML = `<div class="stat-head"><strong>Lượt gần đây</strong><span class="chip">${list.length}</span></div><div class="visit-list">${body}</div>`;
   };
 
   const feedLine = (e: FeedEvent) => {
@@ -338,6 +469,7 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
 
   const renderRoomButtons = () => {
     const view = room.view();
+    if (themeSelect.value !== view.theme) themeSelect.value = view.theme;
     const zoom = hud.querySelector("[data-zoom]");
     if (zoom) zoom.textContent = view.zoom;
     const day = hud.querySelector('[data-act="day"]');
@@ -358,6 +490,7 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
     renderStats();
     renderPeople();
     renderDetail();
+    renderVisits();
     renderFeed();
   };
 
@@ -365,6 +498,14 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest }: HudOp
   room.subscribe(renderRoomButtons);
   refresh();
   renderRoomButtons();
+
+  /** Keep live clocks ticking even when people frames are quiet. */
+  window.setInterval(() => {
+    if (store.people().length || store.selected) {
+      renderPeople();
+      renderDetail();
+    }
+  }, 1000);
 
   let bannerTimer = 0;
   store.onEvent((e) => {

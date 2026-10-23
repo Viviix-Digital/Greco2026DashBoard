@@ -1,17 +1,27 @@
 import type { LiveConfig } from "./config";
 import type {
   CameraInfo,
+  CompletedVisit,
   ConnInfo,
+  CrossingMsg,
   FeedEvent,
+  LivePersonSession,
   PeopleCamera,
   Person,
   PersonView,
   ServerMessage,
+  Side,
   StatusCamera,
   StatusTotals,
+  TrackMsg,
 } from "./types";
 
 const MAX_FEED = 40;
+const MAX_VISITS = 80;
+/** Keep pending dwell_s briefly so a later `track` can join it. */
+const DWELL_JOIN_WINDOW_S = 30;
+/** Drop live sessions that have not appeared in people for this long (matches server track delay). */
+const SESSION_STALE_S = 4;
 
 export interface CameraStats {
   persons: number;
@@ -21,6 +31,15 @@ export interface CameraStats {
   alerts: number;
   status: string;
   fps: number | null;
+  entries: number | null;
+  exits: number | null;
+}
+
+interface PendingDwell {
+  cameraId: string;
+  trackId: number;
+  dwellS: number;
+  ts: number;
 }
 
 /** Latest state pushed by the backend. Message `people` is a full frame, never a delta. */
@@ -30,16 +49,22 @@ export class LiveStore {
   activeCamera: string | null = null;
   selected: string | null = null;
   feed: FeedEvent[] = [];
+  /** Recent completed visibility visits (newest last). */
+  visits: CompletedVisit[] = [];
   /** Bumps on every `people` message or camera switch so the 3D stage knows to re-read. */
   peopleVersion = 0;
   /** Largest server `ts` seen, used to backfill events after a reconnect. */
   lastTs = 0;
   mock = false;
   lastError: string | null = null;
+  /** Client_now_s − server_time; add to Date.now()/1000 for server-aligned clocks. */
+  clockOffset = 0;
 
   private totals: StatusTotals | null = null;
   private statusCams = new Map<string, StatusCamera>();
   private frames = new Map<string, { frameSize: [number, number]; people: PersonView[] }>();
+  private sessions = new Map<string, LivePersonSession>();
+  private pendingDwells: PendingDwell[] = [];
   private userPicked = false;
   private seen = new Set<string>();
   private viByLabel = new Map<string, string>();
@@ -77,10 +102,14 @@ export class LiveStore {
     this.totals = null;
     this.statusCams.clear();
     this.frames.clear();
+    this.sessions.clear();
+    this.pendingDwells = [];
+    this.visits = [];
     this.feed = [];
     this.seen.clear();
     this.lastTs = 0;
     this.lastError = null;
+    this.clockOffset = 0;
     this.peopleVersion += 1;
     this.emit();
   }
@@ -90,6 +119,7 @@ export class LiveStore {
     this.frames.clear();
     this.statusCams.clear();
     this.totals = null;
+    this.sessions.clear();
     this.peopleVersion += 1;
     this.emit();
   }
@@ -115,6 +145,9 @@ export class LiveStore {
     switch (msg.type) {
       case "hello":
         this.cameras = Array.isArray(msg.cameras) ? msg.cameras : [];
+        if (typeof msg.server_time === "number") {
+          this.clockOffset = msg.server_time - Date.now() / 1000;
+        }
         if (!this.activeCamera || !this.cameras.some((c) => c.id === this.activeCamera)) {
           const first = this.cameras.find((c) => c.enabled) ?? this.cameras[0];
           if (first && !this.userPicked) this.activeCamera = first.id;
@@ -129,13 +162,22 @@ export class LiveStore {
         }
         break;
       case "people":
-        this.applyPeople(msg.cameras ?? []);
+        this.applyPeople(msg.cameras ?? [], typeof msg.ts === "number" ? msg.ts : this.now());
         break;
       case "crossing":
+        this.applyCrossing(msg);
+        this.pushEvent(msg);
+        break;
       case "alert":
+        this.applyAlert(msg.camera_id, msg.track_id, msg.ts);
+        this.pushEvent(msg);
+        break;
       case "camera":
       case "reset":
         this.pushEvent(msg);
+        break;
+      case "track":
+        this.applyTrack(msg);
         break;
       case "error":
         this.lastError = msg.error;
@@ -151,6 +193,8 @@ export class LiveStore {
     const fresh = [...events].sort((a, b) => a.ts - b.ts);
     let added = false;
     for (const e of fresh) {
+      if (e.type === "crossing") this.applyCrossing(e);
+      if (e.type === "alert") this.applyAlert(e.camera_id, e.track_id, e.ts);
       if (this.pushEvent(e, false)) added = true;
     }
     if (added) this.emit();
@@ -169,8 +213,47 @@ export class LiveStore {
     return this.people().find((p) => p.key === this.selected) ?? null;
   }
 
+  session(key: string): LivePersonSession | undefined {
+    return this.sessions.get(key);
+  }
+
+  /** Visits for the active camera (newest first). */
+  recentVisits(limit = 12): CompletedVisit[] {
+    const cam = this.activeCamera;
+    const list = cam ? this.visits.filter((v) => v.cameraId === cam) : this.visits;
+    return [...list].reverse().slice(0, limit);
+  }
+
   cameraName(id: string) {
     return this.cameras.find((c) => c.id === id)?.name ?? id;
+  }
+
+  /** Server-aligned unix seconds. */
+  now() {
+    return Date.now() / 1000 + this.clockOffset;
+  }
+
+  /** Elapsed seconds a live person has been continuously visible. */
+  visibleElapsed(key: string, at = this.now()): number | null {
+    const s = this.sessions.get(key);
+    if (!s || s.trackId === null) return null;
+    return Math.max(0, at - s.firstSeenTs);
+  }
+
+  /** Elapsed seconds currently inside the zone (null if not in / no enter). */
+  zoneElapsed(key: string, at = this.now()): number | null {
+    const s = this.sessions.get(key);
+    if (!s || s.trackId === null || s.lastSide !== "in" || s.zoneEnterTs === null) return null;
+    return Math.max(0, at - s.zoneEnterTs);
+  }
+
+  /** Preferred chip duration: zone if inside, else visible. */
+  primaryElapsed(key: string, side: Side, at = this.now()): number | null {
+    if (side === "in") {
+      const z = this.zoneElapsed(key, at);
+      if (z !== null) return z;
+    }
+    return this.visibleElapsed(key, at);
   }
 
   stats(): CameraStats {
@@ -186,11 +269,21 @@ export class LiveStore {
         alerts: cam.alerts,
         status: cam.status,
         fps: cam.fps ?? null,
+        entries: cam.entries ?? null,
+        exits: cam.exits ?? null,
       };
     }
     const t = this.totals;
     if (t && !this.activeCamera) {
-      return { ...t, status: "running", fps: null, inside: t.inside ?? null, outside: t.outside ?? null };
+      return {
+        ...t,
+        status: "running",
+        fps: null,
+        inside: t.inside ?? null,
+        outside: t.outside ?? null,
+        entries: t.entries ?? null,
+        exits: t.exits ?? null,
+      };
     }
     return {
       persons: people.length,
@@ -200,20 +293,152 @@ export class LiveStore {
       alerts: people.filter((p) => p.alert).length,
       status: this.conn.state === "open" ? "running" : "offline",
       fps: null,
+      entries: null,
+      exits: null,
     };
   }
 
-  private applyPeople(cams: PeopleCamera[]) {
+  private applyPeople(cams: PeopleCamera[], ts: number) {
     this.frames.clear();
+    const liveKeys = new Set<string>();
     for (const cam of cams) {
       const people = (cam.people ?? []).map((p, index) => this.normalise(cam.id, p, index));
       this.frames.set(cam.id, { frameSize: cam.frame_size ?? [1920, 1080], people });
+      for (const p of people) {
+        liveKeys.add(p.key);
+        this.touchSession(p, ts);
+      }
+    }
+    for (const [key, s] of this.sessions) {
+      if (liveKeys.has(key)) continue;
+      if (ts - s.lastSeenTs > SESSION_STALE_S) this.sessions.delete(key);
     }
     if (!this.userPicked && (!this.activeCamera || !this.frames.has(this.activeCamera))) {
       const first = cams[0]?.id;
       if (first) this.activeCamera = first;
     }
     this.peopleVersion += 1;
+  }
+
+  private touchSession(p: PersonView, ts: number) {
+    if (p.track_id === null || p.track_id === undefined) return;
+    const existing = this.sessions.get(p.key);
+    if (!existing) {
+      const inZone = p.side === "in";
+      this.sessions.set(p.key, {
+        key: p.key,
+        cameraId: p.cameraId,
+        trackId: p.track_id,
+        firstSeenTs: ts,
+        lastSeenTs: ts,
+        zoneEnterTs: inZone ? ts : null,
+        zoneEstimated: inZone,
+        lastSide: p.side,
+        sideSinceTs: ts,
+        lastDwellS: null,
+        alertTs: p.alert ? ts : null,
+      });
+      return;
+    }
+    existing.lastSeenTs = ts;
+    if (p.side !== existing.lastSide) {
+      existing.lastSide = p.side;
+      existing.sideSinceTs = ts;
+      if (p.side === "in" && existing.zoneEnterTs === null) {
+        existing.zoneEnterTs = ts;
+        existing.zoneEstimated = true;
+      }
+      if (p.side === "out") {
+        existing.zoneEnterTs = null;
+        existing.zoneEstimated = false;
+      }
+    }
+    if (p.alert && existing.alertTs === null) existing.alertTs = ts;
+  }
+
+  private applyCrossing(e: CrossingMsg) {
+    if (e.track_id === null || e.track_id === undefined) return;
+    const key = `${e.camera_id}:${e.track_id}`;
+    const s = this.sessions.get(key);
+    if (e.direction === "in") {
+      if (s) {
+        s.zoneEnterTs = e.ts;
+        s.zoneEstimated = false;
+        s.lastSide = "in";
+        s.sideSinceTs = e.ts;
+      }
+      return;
+    }
+    if (typeof e.dwell_s === "number") {
+      if (s) {
+        s.lastDwellS = e.dwell_s;
+        s.zoneEnterTs = null;
+        s.zoneEstimated = false;
+        s.lastSide = "out";
+        s.sideSinceTs = e.ts;
+      }
+      this.pendingDwells.push({
+        cameraId: e.camera_id,
+        trackId: e.track_id,
+        dwellS: e.dwell_s,
+        ts: e.ts,
+      });
+      this.trimPendingDwells(e.ts);
+      // Patch a visit that arrived before the crossing out (unlikely but safe).
+      for (let i = this.visits.length - 1; i >= 0; i--) {
+        const v = this.visits[i];
+        if (v.cameraId !== e.camera_id || v.trackId !== e.track_id) continue;
+        if (Math.abs(v.lastTs - e.ts) > DWELL_JOIN_WINDOW_S) continue;
+        if (v.dwellS === undefined) v.dwellS = e.dwell_s;
+        break;
+      }
+    }
+  }
+
+  private applyAlert(cameraId: string, trackId: number | null, ts: number) {
+    if (trackId === null || trackId === undefined) return;
+    const s = this.sessions.get(`${cameraId}:${trackId}`);
+    if (s && s.alertTs === null) s.alertTs = ts;
+  }
+
+  private applyTrack(msg: TrackMsg) {
+    const firstTs = msg.first_ts ?? (typeof msg.duration === "number" ? msg.ts - msg.duration : msg.ts);
+    const lastTs = msg.last_ts ?? msg.ts;
+    const duration = msg.duration ?? Math.max(0, lastTs - firstTs);
+    const trackId = msg.track_id ?? null;
+    const dwell = this.takePendingDwell(msg.camera_id, trackId, lastTs);
+    const visit: CompletedVisit = {
+      id: `${msg.camera_id}|${trackId ?? "?"}|${firstTs}|${lastTs}`,
+      cameraId: msg.camera_id,
+      trackId,
+      firstTs,
+      lastTs,
+      duration,
+      firstSide: msg.first_side,
+      lastSide: msg.last_side,
+      items: msg.items ?? {},
+      frames: msg.frames,
+      alert: !!msg.alert,
+      ...(dwell !== undefined ? { dwellS: dwell } : {}),
+    };
+    if (!this.visits.some((v) => v.id === visit.id)) {
+      this.visits.push(visit);
+      if (this.visits.length > MAX_VISITS) this.visits.splice(0, this.visits.length - MAX_VISITS);
+    }
+    if (trackId !== null) this.sessions.delete(`${msg.camera_id}:${trackId}`);
+  }
+
+  private takePendingDwell(cameraId: string, trackId: number | null, at: number): number | undefined {
+    if (trackId === null) return undefined;
+    this.trimPendingDwells(at);
+    const idx = this.pendingDwells.findIndex((d) => d.cameraId === cameraId && d.trackId === trackId);
+    if (idx < 0) return undefined;
+    const [d] = this.pendingDwells.splice(idx, 1);
+    return d.dwellS;
+  }
+
+  private trimPendingDwells(at: number) {
+    this.pendingDwells = this.pendingDwells.filter((d) => at - d.ts <= DWELL_JOIN_WINDOW_S);
   }
 
   /** Vietnamese name for an English label, learned from `people` (alert events only carry labels). */

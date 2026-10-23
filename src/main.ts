@@ -7,6 +7,7 @@ import { VisionSocket, type Feed } from "./live/socket";
 import { LiveStore } from "./live/store";
 import { createWorld } from "./scene/createScene";
 import { PeopleStage } from "./scene/people/stage";
+import { loadThemeId, saveThemeId, type ThemeId } from "./scene/themes";
 import { RoomView } from "./scene/roomView";
 import { mount } from "./ui/chrome";
 
@@ -18,10 +19,18 @@ installClay();
 const canvas = document.createElement("canvas");
 app.append(canvas);
 
-const world = createWorld(canvas);
-const room = new RoomView(world);
+const initialTheme = loadThemeId();
+const world = createWorld(canvas, initialTheme);
+const room = new RoomView(world, initialTheme);
 const store = new LiveStore(loadConfig());
 const stage = new PeopleStage(world, store, room);
+stage.setTheme(initialTheme);
+
+const applyTheme = (theme: ThemeId) => {
+  saveThemeId(theme);
+  room.setTheme(theme);
+  stage.setTheme(theme);
+};
 
 let testing = new URLSearchParams(location.search).get("mock") === "1";
 let live: Feed | null = null;
@@ -48,7 +57,7 @@ const applyConfig = (config: LiveConfig) => {
   setTest(testing);
 };
 
-mount(app, { room, store, onConfig: applyConfig, onTest: setTest });
+mount(app, { room, store, onConfig: applyConfig, onTest: setTest, theme: initialTheme, onTheme: applyTheme });
 
 canvas.addEventListener("pointerdown", (e) => {
   const key = stage.pick(e);

@@ -24,6 +24,7 @@ export const ICONS = {
   volume: stroke(`<path d="M4 10h3l4-3v10l-4-3H4z"/><path d="M15 9.5a3.5 3.5 0 0 1 0 5M17 7.5a6 6 0 0 1 0 9"/>`),
   mute: stroke(`<path d="M4 10h3l4-3v10l-4-3H4z"/><path d="M16 10l4 4M20 10l-4 4"/>`),
   search: stroke(`<circle cx="11" cy="11" r="5.5"/><path d="M15.5 15.5 20 20"/>`),
+  store: stroke(`<path d="M4 9l1.2-4h13.6L20 9"/><path d="M4 9a2.4 2.4 0 0 0 4.8 0A2.4 2.4 0 0 0 13.6 9 2.4 2.4 0 0 0 18.4 9 2.3 2.3 0 0 0 20 9"/><path d="M5.5 11.5V20h13v-8.5"/><path d="M9.5 20v-5h5v5"/>`),
   hammer: stroke(`<path d="M4 14l6-6 3 3-6 6H4v-3z"/><path d="M13 8l3-3 3 3-3 3"/><path d="M14 14l6 6"/>`),
   seatTool: stroke(`<path d="M6 14h12v2H6z"/><path d="M8 14V8h8v6M7 16v3M17 16v3"/>`),
   books: illus(`<rect x="10" y="28" width="28" height="7" rx="1.5" fill="#6d90d2"/><rect x="12" y="20" width="26" height="7" rx="1.5" fill="#e07a62"/><rect x="11" y="12" width="24" height="7" rx="1.5" fill="#7dba78"/><rect x="14" y="8" width="18" height="4" rx="1" fill="#e2b15a"/>`),

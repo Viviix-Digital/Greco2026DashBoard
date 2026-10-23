@@ -22,15 +22,27 @@ function cache(mat: THREE.Material, key: string) {
   return mat;
 }
 
-export function tileMaterial() {
+export interface TilePalette {
+  floorA?: string;
+  floorB?: string;
+  grout?: string;
+  tileSize?: number;
+  key?: string;
+}
+
+export function tileMaterial(palette: TilePalette = {}) {
+  const floorA = palette.floorA ?? PAL.floorA;
+  const floorB = palette.floorB ?? PAL.floorB;
+  const grout = palette.grout ?? PAL.grout;
+  const tileSize = palette.tileSize ?? ROOM.tile;
   const mat = new THREE.MeshLambertMaterial({ color: "#ffffff" });
-  cache(mat, "tile-floor");
+  cache(mat, `tile-floor-${palette.key ?? "room"}`);
   mat.onBeforeCompile = (shader) => {
     worldVarying(shader);
     shader.fragmentShader = shader.fragmentShader.replace(
       "#include <color_fragment>",
       `#include <color_fragment>
-      vec2 gp = vW.xz / ${ROOM.tile.toFixed(3)};
+      vec2 gp = vW.xz / ${tileSize.toFixed(3)};
       vec2 id = floor(gp);
       vec2 f = fract(gp);
       float gw = 0.07;
@@ -38,10 +50,10 @@ export function tileMaterial() {
       float my = smoothstep(0.0, 0.012, f.y - gw) * smoothstep(0.0, 0.012, (1.0 - gw) - f.y);
       float mask = mx * my;
       float n = hash12(id);
-      vec3 tile = mix(vec3(${hex(PAL.floorA)}), vec3(${hex(PAL.floorB)}), n);
+      vec3 tile = mix(vec3(${hex(floorA)}), vec3(${hex(floorB)}), n);
       float lip = smoothstep(gw + 0.01, gw + 0.055, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
       tile *= mix(0.9, 1.0, lip);
-      vec3 grout = vec3(${hex(PAL.grout)});
+      vec3 grout = vec3(${hex(grout)});
       diffuseColor.rgb = mix(grout, tile, mask);
       float edge = smoothstep(0.0, 0.55, min(vW.x, vW.z));
       diffuseColor.rgb *= mix(0.84, 1.0, edge);`,
@@ -154,6 +166,66 @@ export function rugMaterial() {
       `#include <color_fragment>
       float n = hash12(floor(vP * 48.0));
       diffuseColor.rgb *= mix(0.96, 1.04, n);`,
+    );
+  };
+  return mat;
+}
+
+/** Grey concrete with per-cell noise and faint painted guide lines, for the construction floor. */
+export function concreteMaterial() {
+  const mat = new THREE.MeshLambertMaterial({ color: "#ffffff" });
+  cache(mat, "concrete-floor");
+  mat.onBeforeCompile = (shader) => {
+    worldVarying(shader);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <color_fragment>",
+      `#include <color_fragment>
+      vec2 gp = vW.xz / 0.8;
+      vec2 id = floor(gp);
+      vec2 f = fract(gp);
+      float n = hash12(id);
+      vec3 base = mix(vec3(${hex("#a8a9a4")}), vec3(${hex("#94958f")}), n);
+      float seam = smoothstep(0.0, 0.02, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
+      base *= mix(0.82, 1.0, seam);
+      float speckle = hash12(floor(vW.xz * 22.0));
+      base *= mix(0.94, 1.05, speckle);
+      float lane = smoothstep(0.035, 0.0, abs(fract(vW.z / 1.6) - 0.5) - 0.42) * smoothstep(3.2, 2.4, vW.x) * step(0.4, vW.x);
+      base = mix(base, vec3(${hex("#d9a92c")}) * 0.9, lane * 0.28);
+      diffuseColor.rgb = base;
+      float edge = smoothstep(0.0, 0.55, min(vW.x, vW.z));
+      diffuseColor.rgb *= mix(0.84, 1.0, edge);`,
+    );
+  };
+  return mat;
+}
+
+/** Diagonal black/yellow hazard stripes (barriers, crane base, kerbs). */
+export function hazardMaterial(a = "#f2b705", b = "#33302c") {
+  const mat = new THREE.MeshLambertMaterial({ color: "#ffffff" });
+  cache(mat, `hazard-${a}-${b}`);
+  mat.onBeforeCompile = (shader) => {
+    worldVarying(shader);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <color_fragment>",
+      `#include <color_fragment>
+      float s = step(0.5, fract((vW.x + vW.z + vW.y) * 3.2));
+      diffuseColor.rgb = mix(vec3(${hex(a)}), vec3(${hex(b)}), s);`,
+    );
+  };
+  return mat;
+}
+
+/** Two-colour awning stripes for the storefront. */
+export function stripedMaterial(a = "#d9574a", b = "#f7f2e8") {
+  const mat = new THREE.MeshLambertMaterial({ color: "#ffffff" });
+  cache(mat, `stripes-${a}-${b}`);
+  mat.onBeforeCompile = (shader) => {
+    worldVarying(shader);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <color_fragment>",
+      `#include <color_fragment>
+      float s = step(0.5, fract(vW.x * 2.6 + vW.z * 2.6));
+      diffuseColor.rgb = mix(vec3(${hex(a)}), vec3(${hex(b)}), s);`,
     );
   };
   return mat;

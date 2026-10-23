@@ -3,15 +3,28 @@ import { lerp, tween } from "../anim";
 import { DAY, NIGHT, ROOM, ZOOMS } from "../theme";
 import { contactShadow } from "./contactShadow";
 import type { World } from "./createScene";
-import { defaultItems } from "./defaultScene";
 import { setShadowMapSize } from "./lights";
 import { createObject, footprintOf, type SceneItem } from "./objects";
+import { buildRoom } from "./room";
+import { THEMES, type ThemeId } from "./themes";
 
 export type RoomViewState = {
   zoom: string;
   night: boolean;
   mute: boolean;
+  theme: ThemeId;
 };
+
+function disposeGroup(root: THREE.Object3D) {
+  root.traverse((o) => {
+    if (o instanceof THREE.Mesh || o instanceof THREE.SkinnedMesh) {
+      o.geometry.dispose();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) m.dispose();
+    }
+  });
+  root.removeFromParent();
+}
 
 const RUG_H = 0.038;
 const smooth = (t: number) => t * t * (3 - 2 * t);
@@ -34,9 +47,34 @@ export class RoomView {
   private shadowWarmup = 2;
   private listeners = new Set<() => void>();
 
-  constructor(private world: World) {
-    for (const item of defaultItems()) this.spawn(item);
+  constructor(private world: World, private themeId: ThemeId = "room") {
+    for (const item of THEMES[this.themeId].items) this.spawn(item);
     this.applyLight(0);
+  }
+
+  get theme() {
+    return this.themeId;
+  }
+
+  /** Swap the whole static scene (shell + props) to another theme, disposing the old geometry. */
+  setTheme(id: ThemeId) {
+    if (id === this.themeId && this.nodes.size) return;
+    this.themeId = id;
+    disposeGroup(this.world.shell);
+    const shell = buildRoom(id);
+    this.world.shell = shell;
+    this.world.scene.add(shell);
+    for (const node of [...this.nodes.values()]) disposeGroup(node);
+    this.nodes.clear();
+    this.rugs = [];
+    // world.items itself stays in the scene; only its children were disposed above.
+    this.world.items.clear();
+    for (const item of THEMES[id].items) this.spawn(item);
+    this.shadowWarmup = 2;
+    this.ready = false;
+    this.applyLight(this.nightK);
+    this.world.lights.sun.shadow.needsUpdate = true;
+    this.emit();
   }
 
   subscribe(fn: () => void) {
@@ -45,7 +83,7 @@ export class RoomView {
   }
 
   view(): RoomViewState {
-    return { zoom: ZOOMS[this.zoomIndex].label, night: this.night, mute: this.muted };
+    return { zoom: ZOOMS[this.zoomIndex].label, night: this.night, mute: this.muted, theme: this.themeId };
   }
 
   get isMuted() {
@@ -139,17 +177,21 @@ export class RoomView {
   private spawn(item: SceneItem) {
     const group = createObject(item.kind);
     const [w, d] = footprintOf(group);
-    group.add(contactShadow(w * 0.92, d * 0.92, item.kind === "rug" ? 0.18 : 0.24));
-    group.position.set(item.x, ROOM.floorY, item.z);
+    const isGround = !!item.ground || item.kind === "rug";
+    const shadow = contactShadow(w * 0.92, d * 0.92, isGround ? 0.18 : 0.24);
+    if (group.position.y > 0.1) shadow.visible = false; // wall-mounted: no floor shadow
+    group.add(shadow);
+    // Builders may raise wall-mounted props (frame, menu board, sign) via group.position.y.
+    group.position.set(item.x, ROOM.floorY + group.position.y, item.z);
     group.rotation.y = item.rot;
     this.world.items.add(group);
     this.nodes.set(item.id, group);
-    if (item.kind === "rug") {
+    if (isGround) {
       this.rugs.push({ x: item.x, z: item.z, hw: w / 2, hd: d / 2, rot: item.rot });
     }
     for (const child of group.children) {
       if (child.userData.role === "contact") {
-        const onRug = item.kind !== "rug" && this.onRug(item.x, item.z);
+        const onRug = !isGround && this.onRug(item.x, item.z);
         child.position.y = onRug ? 0.046 : 0.008;
       }
     }

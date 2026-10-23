@@ -120,9 +120,46 @@ export interface TrackMsg {
   ts: number;
   camera_id: string;
   track_id: number | null;
+  first_ts?: number;
+  last_ts?: number;
   duration?: number;
+  frames?: number;
   items?: Record<string, number>;
   alert?: boolean;
+  first_side?: Side | null;
+  last_side?: Side | null;
+}
+
+/** Client-tracked clock for a person still (or just) in frame. Key = PersonView.key. */
+export interface LivePersonSession {
+  key: string;
+  cameraId: string;
+  trackId: number | null;
+  firstSeenTs: number;
+  lastSeenTs: number;
+  zoneEnterTs: number | null;
+  /** True when zoneEnterTs was inferred from side=in without a crossing in. */
+  zoneEstimated: boolean;
+  lastSide: Side;
+  sideSinceTs: number;
+  lastDwellS: number | null;
+  alertTs: number | null;
+}
+
+/** Finished visibility visit from a `track` message, optionally joined with zone dwell. */
+export interface CompletedVisit {
+  id: string;
+  cameraId: string;
+  trackId: number | null;
+  firstTs: number;
+  lastTs: number;
+  duration: number;
+  firstSide?: Side | null;
+  lastSide?: Side | null;
+  items: Record<string, number>;
+  frames?: number;
+  alert: boolean;
+  dwellS?: number;
 }
 
 export interface ErrorMsg {

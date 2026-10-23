@@ -47,7 +47,11 @@ interface Actor {
   ty: number;
   speed: number;
   side: Side;
+  firstSide: Side;
   entered: number | null;
+  firstTs: number | null;
+  frames: number;
+  itemFrames: Record<string, number>;
   life: number;
   gap: number;
   alertAt: number;
@@ -64,6 +68,8 @@ export class MockFeed implements Feed {
   private nextTrack = 1;
   private t = 0;
   private last = 0;
+  private entries = new Map<string, number>();
+  private exits = new Map<string, number>();
 
   constructor(private store: LiveStore) {
     this.store.mock = true;
@@ -72,6 +78,12 @@ export class MockFeed implements Feed {
   start() {
     this.stop();
     this.store.setConn({ state: "open" });
+    this.entries.clear();
+    this.exits.clear();
+    for (const c of CAMERAS) {
+      this.entries.set(c.id, 0);
+      this.exits.set(c.id, 0);
+    }
     this.actors = [
       this.spawn("camera_1", 0, 0),
       this.spawn("camera_1", 1, 2),
@@ -101,6 +113,7 @@ export class MockFeed implements Feed {
     const edge = Math.random() < 0.5;
     const x = edge ? rand(0.05, 0.2) : rand(0.88, 0.95);
     const y = rand(0.45, 0.85);
+    const side = sideOf(x, y);
     return {
       cameraId,
       kit: KITS[kitIndex],
@@ -110,13 +123,39 @@ export class MockFeed implements Feed {
       tx: rand(0.15, 0.9),
       ty: rand(0.3, 0.9),
       speed: rand(0.07, 0.13),
-      side: sideOf(x, y),
+      side,
+      firstSide: side,
       entered: null,
+      firstTs: null,
+      frames: 0,
+      itemFrames: {},
       life: rand(30, 55),
       gap: delay,
       alertAt: 2,
       alerted: false,
     };
+  }
+
+  private finishTrack(a: Actor, ts: number) {
+    if (a.firstTs === null || a.frames < 5) return;
+    const items: Record<string, number> = {};
+    for (const [label, n] of Object.entries(a.itemFrames)) {
+      if (n >= 3) items[label] = n;
+    }
+    this.send({
+      type: "track",
+      ts,
+      camera_id: a.cameraId,
+      track_id: a.track,
+      first_ts: a.firstTs,
+      last_ts: ts,
+      duration: Math.round((ts - a.firstTs) * 10) / 10,
+      frames: a.frames,
+      items,
+      alert: a.alerted,
+      first_side: a.firstSide,
+      last_side: a.side,
+    });
   }
 
   private step() {
@@ -133,9 +172,17 @@ export class MockFeed implements Feed {
       }
       a.life -= dt;
       if (a.life <= 0) {
+        this.finishTrack(a, ts);
         const kitIndex = KITS.indexOf(a.kit);
         return this.spawn(a.cameraId, kitIndex, rand(2, 6) + i * 0.1);
       }
+      if (a.firstTs === null) {
+        a.firstTs = ts;
+        a.firstSide = a.side;
+      }
+      a.frames += 1;
+      for (const k of a.kit) a.itemFrames[k.label] = (a.itemFrames[k.label] ?? 0) + 1;
+
       const dx = a.tx - a.x;
       const dy = a.ty - a.y;
       const d = Math.hypot(dx, dy);
@@ -150,9 +197,11 @@ export class MockFeed implements Feed {
       if (side !== a.side) {
         if (side === "in") {
           a.entered = ts;
+          this.entries.set(a.cameraId, (this.entries.get(a.cameraId) ?? 0) + 1);
           this.send({ type: "crossing", ts, camera_id: a.cameraId, track_id: a.track, direction: "in", mode: "zone" });
         } else {
           const dwell = a.entered ? ts - a.entered : undefined;
+          this.exits.set(a.cameraId, (this.exits.get(a.cameraId) ?? 0) + 1);
           this.send({
             type: "crossing",
             ts,
@@ -229,8 +278,8 @@ export class MockFeed implements Feed {
         inside: here.filter((a) => a.side === "in").length,
         outside: here.filter((a) => a.side === "out").length,
         mode: "zone",
-        entries: 0,
-        exits: 0,
+        entries: this.entries.get(c.id) ?? 0,
+        exits: this.exits.get(c.id) ?? 0,
         alerts: here.filter((a) => a.kit.some((k) => k.alert)).length,
         objects,
       };
@@ -243,6 +292,8 @@ export class MockFeed implements Feed {
         persons: sum((c) => c.persons),
         inside: sum((c) => c.inside ?? 0),
         outside: sum((c) => c.outside ?? 0),
+        entries: sum((c) => c.entries ?? 0),
+        exits: sum((c) => c.exits ?? 0),
         objects: sum((c) => Object.values(c.objects ?? {}).reduce((a, b) => a + b, 0)),
         alerts: sum((c) => c.alerts),
       },

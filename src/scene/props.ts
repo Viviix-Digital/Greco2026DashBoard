@@ -360,7 +360,19 @@ export function buildSingleBook(color = "#6d5aa8") {
   return g;
 }
 
-const ROUND = new Set(["table", "stool", "grass", "grass2", "plant", "plant2", "utensils", "cylinder"]);
+import {
+  buildBarrier, buildBeams, buildBricks, buildCementBags, buildCone, buildCrane, buildExcavator,
+  buildMixer, buildSafetyFence, buildSafetyMat, buildScaffold, buildToolbox, buildWorkLight,
+} from "./propPacks/construction";
+import {
+  buildAwningSign, buildCartBasket, buildCounter, buildDiningTable, buildFloorMat, buildFridge,
+  buildMenuBoard, buildPendantLamp, buildQueueRail, buildShelf,
+} from "./propPacks/store";
+import {
+  buildBoothCarpet, buildBoothMonitor, buildCheckinKiosk, buildReceptionPodium,
+} from "./propPacks/booth";
+
+const ROUND = new Set(["table", "stool", "grass", "grass2", "plant", "plant2", "utensils", "cylinder", "cone", "pendantLamp"]);
 
 export function buildProp(kind: string) {
   const g = makeProp(kind);
@@ -429,6 +441,36 @@ function makeProp(kind: string): THREE.Group {
       return place(pot(0.12, 0.2, "#d7efe4"), [0.28, 0.28], true);
     case "ring":
       return place(ring(), [0.28, 0.28], true);
+    // Construction pack
+    case "crane": return buildCrane();
+    case "scaffold": return buildScaffold();
+    case "mixer": return buildMixer();
+    case "barrier": return buildBarrier();
+    case "cone": return buildCone();
+    case "bricks": return buildBricks();
+    case "beams": return buildBeams();
+    case "toolbox": return buildToolbox();
+    case "excavator": return buildExcavator();
+    case "cementBags": return buildCementBags();
+    case "safetyFence": return buildSafetyFence();
+    case "workLight": return buildWorkLight();
+    case "safetyMat": return buildSafetyMat();
+    // Restaurant / convenience-store pack
+    case "counter": return buildCounter();
+    case "shelf": return buildShelf();
+    case "fridge": return buildFridge();
+    case "diningTable": return buildDiningTable();
+    case "menuBoard": return buildMenuBoard();
+    case "pendantLamp": return buildPendantLamp();
+    case "queueRail": return buildQueueRail();
+    case "cartBasket": return buildCartBasket();
+    case "awningSign": return buildAwningSign();
+    case "floorMat": return buildFloorMat();
+    // Event booth check-in pack
+    case "boothCarpet": return buildBoothCarpet();
+    case "checkinKiosk": return buildCheckinKiosk();
+    case "receptionPodium": return buildReceptionPodium();
+    case "boothMonitor": return buildBoothMonitor();
     default:
       return place(new THREE.Group(), [0.2, 0.2]);
   }

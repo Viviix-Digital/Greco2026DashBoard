@@ -31,7 +31,37 @@ export type Kind =
   | "acorn"
   | "carrot"
   | "cylinder"
-  | "ring";
+  | "ring"
+  // Construction pack
+  | "crane"
+  | "scaffold"
+  | "mixer"
+  | "barrier"
+  | "cone"
+  | "bricks"
+  | "beams"
+  | "toolbox"
+  | "excavator"
+  | "cementBags"
+  | "safetyFence"
+  | "workLight"
+  | "safetyMat"
+  // Restaurant / convenience-store pack
+  | "counter"
+  | "shelf"
+  | "fridge"
+  | "diningTable"
+  | "menuBoard"
+  | "pendantLamp"
+  | "queueRail"
+  | "cartBasket"
+  | "awningSign"
+  | "floorMat"
+  // Event booth check-in pack
+  | "boothCarpet"
+  | "checkinKiosk"
+  | "receptionPodium"
+  | "boothMonitor";
 
 export interface SceneItem {
   id: string;
@@ -39,6 +69,8 @@ export interface SceneItem {
   x: number;
   z: number;
   rot: number;
+  /** Walking-surface cover (rug / safety mat / floor mat): raises groundAt(). */
+  ground?: boolean;
 }
 
 export function createObject(kind: Kind) {

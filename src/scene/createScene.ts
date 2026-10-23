@@ -3,16 +3,19 @@ import { createCamera, resizeCamera } from "./camera";
 import { createLights, type LightRig } from "./lights";
 import { buildGrid, buildRoom } from "./room";
 
+import type { ThemeId } from "./themes/types";
+
 export type World = {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
   lights: LightRig;
+  shell: THREE.Group;
   items: THREE.Group;
   grid: THREE.Group;
 };
 
-export function createWorld(canvas: HTMLCanvasElement): World {
+export function createWorld(canvas: HTMLCanvasElement, theme: ThemeId = "room"): World {
   const renderer = new THREE.WebGLRenderer({
     canvas,
     antialias: true,
@@ -31,7 +34,8 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   const scene = new THREE.Scene();
   const camera = createCamera();
   const lights = createLights(scene);
-  scene.add(buildRoom());
+  const shell = buildRoom(theme);
+  scene.add(shell);
   const items = new THREE.Group();
   items.name = "items";
   scene.add(items);
@@ -47,5 +51,5 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   };
   window.addEventListener("resize", resize);
 
-  return { renderer, scene, camera, lights, items, grid };
+  return { renderer, scene, camera, lights, shell, items, grid };
 }

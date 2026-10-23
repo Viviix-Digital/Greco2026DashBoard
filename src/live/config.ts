@@ -54,7 +54,7 @@ export function splitList(text: string) {
 
 export function wsUrl(config: LiveConfig) {
   const scheme = location.protocol === "https:" ? "wss" : "ws";
-  const q = new URLSearchParams({ topics: "status,people,events" });
+  const q = new URLSearchParams({ topics: "status,people,events,tracks" });
   if (config.cameras.length) q.set("cameras", config.cameras.join(","));
   if (config.token) q.set("token", config.token);
   return `${scheme}://${config.host}:${config.port}/ws?${q.toString()}`;

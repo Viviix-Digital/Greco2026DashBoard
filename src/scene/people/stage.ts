@@ -8,6 +8,7 @@ import { contactShadow } from "../contactShadow";
 import type { World } from "../createScene";
 import type { RoomView } from "../roomView";
 import { ALERT_COLOR, SIDE_COLOR, createLabel, type Label } from "./label";
+import type { ThemeId } from "../themes/types";
 
 /** An avatar that stops showing up in `people` is removed after this long (5 Hz feed, so no flicker). */
 const GRACE_MS = 400;
@@ -47,9 +48,56 @@ function hash(text: string) {
   return h >>> 0;
 }
 
-function recipeFor(key: string): Recipe {
+const CONSTRUCTION_TOPS = ["#f2760a", "#f2b705", "#e87f2e", "#d94f3d"];
+const CONSTRUCTION_BOTTOMS = ["#3f4a63", "#5a5148", "#4a5568"];
+const HARD_HATS = ["#f2b705", "#f7f5f1", "#f2760a"];
+const STORE_TOPS = ["#f7f2e8", "#d9574a", "#63a86b", "#5d8ad2"];
+const STORE_BOTTOMS = ["#4a4038", "#3f4a63", "#6a5a4a"];
+const CAPS = ["#d9574a", "#3f6fb5", "#63a86b"];
+const APRONS = ["#d9574a", "#3f6fb5", "#4a7a52"];
+const BOOTH_CAPS = ["#ff6a1a", "#ff8535", "#2a2e34"];
+const BOOTH_APRONS = ["#ff6a1a", "#ff8535", "#e6331a"];
+const BOOTH_BOTTOMS = ["#3f4a63", "#4a5568", "#2a2e34"];
+
+function recipeFor(key: string, theme: ThemeId = "room"): Recipe {
   const h = hash(key);
   const pick = <T>(list: readonly T[], salt: number) => list[(Math.imul(h ^ (h >>> 13), 2654435761 + salt * 40503) >>> 0) % list.length];
+  if (theme === "construction") {
+    return {
+      top: pick(CONSTRUCTION_TOPS, 0),
+      topAlt: "#e8e4da",
+      bottom: pick(CONSTRUCTION_BOTTOMS, 3),
+      shoe: "#5a3d24",
+      hair: pick(HAIRS, 5),
+      hairStyle: pick(STYLES, 7),
+      hardHat: pick(HARD_HATS, 11),
+      detail: true,
+    };
+  }
+  if (theme === "store") {
+    // Every other person is staff (cap + apron); the rest are customers.
+    const staff = h % 2 === 0;
+    return {
+      top: staff ? "#f7f2e8" : pick(STORE_TOPS, 0),
+      bottom: pick(STORE_BOTTOMS, 3),
+      shoe: PAL.shoe,
+      hair: pick(HAIRS, 5),
+      hairStyle: staff ? "bun" : pick(STYLES, 7),
+      ...(staff ? { cap: pick(CAPS, 11), apron: pick(APRONS, 13) } : {}),
+    };
+  }
+  if (theme === "booth") {
+    // Alternate booth staff (orange brand apron/cap) vs event guests.
+    const staff = h % 2 === 0;
+    return {
+      top: staff ? "#f7f2e8" : pick(TOPS, 0),
+      bottom: staff ? pick(BOOTH_BOTTOMS, 3) : pick(BOTTOMS, 3),
+      shoe: PAL.shoe,
+      hair: pick(HAIRS, 5),
+      hairStyle: staff ? "short" : pick(STYLES, 7),
+      ...(staff ? { cap: pick(BOOTH_CAPS, 11), apron: pick(BOOTH_APRONS, 13) } : {}),
+    };
+  }
   const top = pick(TOPS, 0);
   return {
     top,
@@ -80,11 +128,11 @@ class PersonAvatar {
   private sel: THREE.Mesh;
   private ringMat: THREE.MeshBasicMaterial;
 
-  constructor(person: PersonView, pos: { x: number; z: number }, private ground: (x: number, z: number) => number) {
+  constructor(person: PersonView, pos: { x: number; z: number }, private ground: (x: number, z: number) => number, theme: ThemeId = "room") {
     this.person = person;
     this.x = this.tx = pos.x;
     this.z = this.tz = pos.z;
-    this.avatar = new Avatar(recipeFor(person.key));
+    this.avatar = new Avatar(recipeFor(person.key, theme));
     this.avatar.setCastShadow(false);
     this.holder.userData.personKey = person.key;
     this.holder.add(this.avatar.root);
@@ -224,6 +272,8 @@ export class PeopleStage {
   private ray = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
 
+  private theme: ThemeId = "room";
+
   constructor(
     private world: World,
     private store: LiveStore,
@@ -231,6 +281,15 @@ export class PeopleStage {
   ) {
     this.group.name = "people";
     world.scene.add(this.group);
+  }
+
+  /** Re-dress everyone for the new theme: avatars are rebuilt on the next sync. */
+  setTheme(theme: ThemeId) {
+    if (theme === this.theme) return;
+    this.theme = theme;
+    for (const a of this.avatars.values()) a.dispose();
+    this.avatars.clear();
+    this.version = -999;
   }
 
   update(dt: number) {
@@ -277,7 +336,7 @@ export class PeopleStage {
         continue;
       }
       if (this.avatars.size >= MAX_AVATARS) continue;
-      const a = new PersonAvatar(p, pos, this.room.groundAt);
+      const a = new PersonAvatar(p, pos, this.room.groundAt, this.theme);
       a.lastSeen = now;
       this.avatars.set(p.key, a);
       this.group.add(a.holder);
