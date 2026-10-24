@@ -16,8 +16,11 @@ import type {
   TrackMsg,
 } from "./types";
 
-const MAX_FEED = 40;
-const MAX_VISITS = 80;
+const MAX_FEED = 100;
+const MAX_VISITS = 200;
+const MAX_OCCUPANCY = 120;
+/** Sample live occupancy at most this often (seconds). */
+const OCCUPANCY_SAMPLE_S = 15;
 /** Keep pending dwell_s briefly so a later `track` can join it. */
 const DWELL_JOIN_WINDOW_S = 30;
 /** Drop live sessions that have not appeared in people for this long (matches server track delay). */
@@ -33,6 +36,12 @@ export interface CameraStats {
   fps: number | null;
   entries: number | null;
   exits: number | null;
+}
+
+export interface OccupancySample {
+  ts: number;
+  persons: number;
+  inside: number;
 }
 
 interface PendingDwell {
@@ -65,6 +74,8 @@ export class LiveStore {
   private frames = new Map<string, { frameSize: [number, number]; people: PersonView[] }>();
   private sessions = new Map<string, LivePersonSession>();
   private pendingDwells: PendingDwell[] = [];
+  private occupancy: OccupancySample[] = [];
+  private lastOccupancySample = 0;
   private userPicked = false;
   private seen = new Set<string>();
   private viByLabel = new Map<string, string>();
@@ -106,6 +117,8 @@ export class LiveStore {
     this.pendingDwells = [];
     this.visits = [];
     this.feed = [];
+    this.occupancy = [];
+    this.lastOccupancySample = 0;
     this.seen.clear();
     this.lastTs = 0;
     this.lastError = null;
@@ -160,6 +173,7 @@ export class LiveStore {
           this.statusCams.clear();
           for (const c of msg.cameras) this.statusCams.set(c.id, c);
         }
+        this.sampleOccupancy(typeof msg.ts === "number" ? msg.ts : this.now());
         break;
       case "people":
         this.applyPeople(msg.cameras ?? [], typeof msg.ts === "number" ? msg.ts : this.now());
@@ -256,6 +270,11 @@ export class LiveStore {
     return this.visibleElapsed(key, at);
   }
 
+  /** Session ring of persons/inside for the sparkline chart. */
+  occupancySamples(): OccupancySample[] {
+    return this.occupancy;
+  }
+
   stats(): CameraStats {
     const people = this.people();
     const cam = this.activeCamera ? this.statusCams.get(this.activeCamera) : undefined;
@@ -296,6 +315,20 @@ export class LiveStore {
       entries: null,
       exits: null,
     };
+  }
+
+  private sampleOccupancy(ts: number) {
+    if (ts - this.lastOccupancySample < OCCUPANCY_SAMPLE_S) return;
+    this.lastOccupancySample = ts;
+    const s = this.stats();
+    this.occupancy.push({
+      ts,
+      persons: s.persons,
+      inside: s.inside ?? 0,
+    });
+    if (this.occupancy.length > MAX_OCCUPANCY) {
+      this.occupancy.splice(0, this.occupancy.length - MAX_OCCUPANCY);
+    }
   }
 
   private applyPeople(cams: PeopleCamera[], ts: number) {

@@ -4,9 +4,15 @@ export interface LiveConfig {
   token: string;
   /** Camera ids to receive. Empty = every camera. */
   cameras: string[];
+  /**
+   * MediaMTX HLS URL template. `{camera}` is replaced with the active camera id.
+   * Example: `http://127.0.0.1:8888/{camera}/index.m3u8`
+   */
+  streamUrl: string;
 }
 
 const STORAGE_KEY = "vision-expo-config";
+const DEFAULT_STREAM = "http://127.0.0.1:8888/{camera}/index.m3u8";
 
 const env = import.meta.env;
 
@@ -16,6 +22,7 @@ export function defaultConfig(): LiveConfig {
     port: Number(env.VITE_VISION_PORT) || 8000,
     token: String(env.VITE_VISION_TOKEN || ""),
     cameras: splitList(String(env.VITE_VISION_CAMERAS || "")),
+    streamUrl: String(env.VITE_STREAM_URL || DEFAULT_STREAM),
   };
 }
 
@@ -31,6 +38,10 @@ export function loadConfig(): LiveConfig {
       port: Number(saved.port) > 0 ? Number(saved.port) : base.port,
       token: typeof saved.token === "string" ? saved.token : base.token,
       cameras: Array.isArray(saved.cameras) ? saved.cameras.filter(Boolean) : base.cameras,
+      streamUrl:
+        typeof saved.streamUrl === "string" && saved.streamUrl.trim()
+          ? saved.streamUrl.trim()
+          : base.streamUrl,
     };
   } catch {
     return base;

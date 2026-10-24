@@ -7,8 +7,10 @@ import type { CompletedVisit, FeedEvent, PersonView } from "../live/types";
 import type { RoomView } from "../scene/roomView";
 import { ALERT_COLOR, SIDE_COLOR, SIDE_TEXT, itemNames, personTitle } from "../scene/people/label";
 import { THEME_LIST, type ThemeId } from "../scene/themes";
+import { mountAnalytics } from "./analytics";
 import { backdropMarkup } from "./backdrop";
 import { ICONS } from "./icons";
+import { mountPreview } from "./preview";
 
 const CAMERA_STATUS: Record<string, string> = {
   running: "Đang chạy",
@@ -83,6 +85,8 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest, theme, 
         <label class="field">Cổng<input data-f="port" inputmode="numeric" autocomplete="off" /></label>
         <label class="field">Token<input data-f="token" type="password" autocomplete="off" placeholder="để trống nếu không đặt" /></label>
         <label class="field">Camera (id, cách nhau dấu phẩy)<input data-f="cameras" autocomplete="off" spellcheck="false" placeholder="trống = mọi camera" /></label>
+        <label class="field">URL stream MediaMTX<input data-f="streamUrl" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:8888/{camera}/index.m3u8" /></label>
+        <p class="muted tiny">Dùng <code>{camera}</code> để thay bằng id camera đang chọn. HLS mặc định cổng 8888.</p>
         <button class="wide primary" data-act="save-config">Lưu và kết nối lại</button>
         <h3 class="sub">Bóng đổ</h3>
         <div class="row">
@@ -122,6 +126,7 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest, theme, 
     port: $<HTMLInputElement>('[data-f="port"]'),
     token: $<HTMLInputElement>('[data-f="token"]'),
     cameras: $<HTMLInputElement>('[data-f="cameras"]'),
+    streamUrl: $<HTMLInputElement>('[data-f="streamUrl"]'),
   };
 
   const fillFields = () => {
@@ -130,8 +135,12 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest, theme, 
     fields.port.value = String(c.port);
     fields.token.value = c.token;
     fields.cameras.value = c.cameras.join(", ");
+    fields.streamUrl.value = c.streamUrl;
   };
   fillFields();
+
+  const preview = mountPreview(hud, store);
+  const analytics = mountAnalytics(hud, store);
 
   const setOpen = (name: string | null) => {
     for (const panel of hud.querySelectorAll<HTMLElement>("[data-panel]")) {
@@ -169,10 +178,16 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest, theme, 
         port: port > 0 && port < 65536 ? port : store.config.port,
         token: fields.token.value,
         cameras: splitList(fields.cameras.value),
+        streamUrl: fields.streamUrl.value.trim() || store.config.streamUrl,
       };
       saveConfig(next);
       onConfig(next);
+      preview.sync();
       setOpen(null);
+      return;
+    }
+    if (act === "open-analytics") {
+      analytics.open();
       return;
     }
     if (act === "close-detail") {
@@ -270,7 +285,8 @@ export function mount(app: HTMLElement, { room, store, onConfig, onTest, theme, 
         <div><b>${n(s.exits)}</b><span>Lượt ra</span></div>
         <div><b>${n(s.objects)}</b><span>Vật phẩm</span></div>
         <div class="${s.alerts > 0 ? "danger" : ""}"><b>${n(s.alerts)}</b><span>Cảnh báo</span></div>
-      </div>`;
+      </div>
+      <button type="button" class="wide primary stats-detail" data-act="open-analytics">Chi tiết &amp; lịch sử</button>`;
   };
 
   const personTimeChip = (p: PersonView) => {
